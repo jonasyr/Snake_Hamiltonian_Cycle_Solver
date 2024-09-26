@@ -4,6 +4,9 @@ from random import randint
 import time
 import os
 from collections import deque
+import tkinter as tk
+from tkinter import ttk
+import threading
 
 # Used to modify the window size, values must be a multiple of 40
 screen_width = 800
@@ -11,6 +14,65 @@ screen_height = 600
 
 # Controls where the window appears on the screen
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0, 30)
+
+# Initialize Tkinter
+root = tk.Tk()
+root.title("Control Panel")
+root.geometry("350x50+810+30")  # Set size and position beside the Pygame window
+
+# Speed control variable
+speed_var = tk.IntVar(value=15)
+
+# Speed control slider
+speed_label = ttk.Label(root, text="Speed:")
+speed_label.pack(side=tk.LEFT, padx=5, pady=5)
+speed_slider = ttk.Scale(root, from_=1, to=60, variable=speed_var, orient=tk.HORIZONTAL)
+speed_slider.pack(side=tk.LEFT, padx=5, pady=5)
+
+# Speed value display
+speed_value_label = ttk.Label(root, text="15")
+speed_value_label.pack(side=tk.LEFT, padx=5, pady=5)
+
+# Update the speed value display as the slider is moved
+def update_speed_label(event):
+    speed_value_label.config(text=str(speed_var.get()))
+
+speed_slider.bind("<Motion>", update_speed_label)
+
+# Show/Hide Hamiltonian cycle variable
+show_cycle_var = tk.BooleanVar(value=True)
+
+# Show/Hide Hamiltonian cycle button
+def toggle_cycle():
+    show_cycle_var.set(not show_cycle_var.get())
+    toggle_button.config(text="Hide Cycle" if show_cycle_var.get() else "Show Cycle")
+
+toggle_button = ttk.Button(root, text="Hide Cycle", command=toggle_cycle)
+toggle_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+# Flag to indicate when to stop the Pygame loop
+stop_game = threading.Event()
+
+# Close button
+def close_program():
+    stop_game.set()
+    root.quit()  # Use root.quit() instead of root.destroy() to ensure the main loop exits
+
+close_button = ttk.Button(root, text="Close", command=close_program)
+close_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+
+# Function to update speed
+def update_speed():
+    try:
+        speed = int(speed_slider.get())
+        if speed < 1:
+            speed = 1
+        speed_var.set(speed)
+    except ValueError:
+        pass
+
+speed_slider.bind("<Return>", lambda event: update_speed())
 
 
 class Fruit(object):
@@ -178,7 +240,7 @@ def gameplay(fruit, snake, cycle):
     except ValueError:
         print(f"Initial position {position} not found in the Hamiltonian cycle.")
         pg.quit()
-        sys.exit()
+        return
 
     length = len(cycle)
     run = True
@@ -187,20 +249,23 @@ def gameplay(fruit, snake, cycle):
     current_shortcut_path = None
 
     # Loop simulates the movement of the snake and controls game mechanics
-    while run:
+    while run and not stop_game.is_set():
 
         # Controls the frame rate of the graphics to make movement smooth and modify the speed of the simulation
         clock = pg.time.Clock()
-        clock.tick(60)
+        clock.tick(speed_var.get())  # Use the speed from the Tkinter slider
 
         # If the user clicks the exit button the program closes
         for event in pg.event.get():
             if event.type == pg.QUIT:
+                stop_game.set()
                 pg.quit()
-                sys.exit()
+                return
 
         # Movement is simulated by making screen black and redrawing the snake and fruit
         window.fill(pg.Color(0, 0, 0))
+        if show_cycle_var.get():
+            draw_hamiltonian_cycle(window, cycle, snake)  # Draw the Hamiltonian cycle if enabled
         fruit.draw_fruit(window)
         snake.draw_snake(window)
 
@@ -220,14 +285,16 @@ def gameplay(fruit, snake, cycle):
                     current_shortcut_path = None  # Reset shortcut after eating
                 else:
                     time.sleep(3)
+                    stop_game.set()
                     pg.quit()
-                    sys.exit()
+                    return
 
             # Check for boundary collision
             if snake.boundary_collision():
                 time.sleep(3)
+                stop_game.set()
                 pg.quit()
-                sys.exit()
+                return
 
             # After moving, check if shortcut is complete
             if not current_shortcut_path:
@@ -235,8 +302,9 @@ def gameplay(fruit, snake, cycle):
                     index = cycle.index(position)
                 except ValueError:
                     print(f"Position after shortcut {position} not found in the Hamiltonian cycle.")
+                    stop_game.set()
                     pg.quit()
-                    sys.exit()
+                    return
         else:
             # --- Shortcut Logic Start ---
             # Determine whether to take a shortcut based on snake's length
@@ -283,14 +351,16 @@ def gameplay(fruit, snake, cycle):
                         snake.snake_size()
                     else:
                         time.sleep(3)
+                        stop_game.set()
                         pg.quit()
-                        sys.exit()
+                        return
 
                 # Check for boundary collision
                 elif snake.boundary_collision():
                     time.sleep(3)
+                    stop_game.set()
                     pg.quit()
-                    sys.exit()
+                    return
         # --------------------------------
 
         # Draws all elements on the window
@@ -448,6 +518,16 @@ def get_neighbors(pos, grid_width, grid_height):
     if y < grid_height - 1:
         neighbors.append((x, y + 1))
     return neighbors
+
+def draw_hamiltonian_cycle(surface, cycle, snake):
+    for i in range(len(cycle) - 1):
+        start_pos = (cycle[i][0] * snake.width + snake.width // 2, cycle[i][1] * snake.height + snake.height // 2)
+        end_pos = (cycle[i + 1][0] * snake.width + snake.width // 2, cycle[i + 1][1] * snake.height + snake.height // 2)
+        pg.draw.line(surface, pg.Color(0, 0, 255), start_pos, end_pos, 1)
+    # Connect the last point to the first to complete the cycle
+    start_pos = (cycle[-1][0] * snake.width + snake.width // 2, cycle[-1][1] * snake.height + snake.height // 2)
+    end_pos = (cycle[0][0] * snake.width + snake.width // 2, cycle[0][1] * snake.height + snake.height // 2)
+    pg.draw.line(surface, pg.Color(0, 0, 255), start_pos, end_pos, 1)
 
 
 # Uses prim's algorithm to generate a randomized maze using randomized edge weights
@@ -769,10 +849,32 @@ def path_generator(graph, cells):
     return path
 
 
-circuit = prim_maze_generator(int(screen_height/40), int(screen_width/40))
-pg.init()
-window = pg.display.set_mode((screen_width, screen_height))
-pg.display.set_caption('Snake Solver')
-fruit = Fruit()
-snake = Snake()
-gameplay(fruit, snake, circuit)
+def run_pygame():
+    circuit = prim_maze_generator(int(screen_height/40), int(screen_width/40))
+    pg.init()
+    global window
+    window = pg.display.set_mode((screen_width, screen_height))
+    pg.display.set_caption('Snake Solver')
+    fruit = Fruit()
+    snake = Snake()
+    gameplay(fruit, snake, circuit)
+
+# Run Pygame in a separate thread
+pygame_thread = threading.Thread(target=run_pygame)
+pygame_thread.daemon = True
+pygame_thread.start()
+
+# Run Tkinter main loop in the main thread
+root.mainloop()
+
+
+# circuit = prim_maze_generator(int(screen_height/40), int(screen_width/40))
+# pg.init()
+# window = pg.display.set_mode((screen_width, screen_height))
+# pg.display.set_caption('Snake Solver')
+# fruit = Fruit()
+# snake = Snake()
+# gameplay(fruit, snake, circuit)
+
+# Wait for the Pygame thread to finish
+pygame_thread.join()
