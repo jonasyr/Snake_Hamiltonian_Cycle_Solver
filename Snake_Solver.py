@@ -39,26 +39,30 @@ class Fruit(object):
         return self.fruit.colliderect(head)
 
     # Finds a new location for a fruit after a collision occurs
-    def fruit_position(self):
+    def fruit_position(self, snake):
 
         flag = True
         while flag:
 
             # The position of the fruit is chosen randomly
-            self.x = randint(0, int(screen_width/self.width) - 1) * self.width
-            self.y = randint(0, int(screen_height/self.height) - 1) * self.height
+            self.x = randint(0, int(screen_width / self.width) - 1) * self.width
+            self.y = randint(0, int(screen_height / self.height) - 1) * self.height
+
+            # # Avoid placing on the boundary by limiting the random range
+            # self.x = randint(1, int((screen_width / self.width) - 2)) * self.width
+            # self.y = randint(1, int((screen_height / self.height) - 2)) * self.height
 
             # Checks whether the new fruit location is already occupied by the snake's body
             if snake.empty_space(self.x, self.y):
-                break
+                flag = False
 
 
 class Snake(object):
 
     def __init__(self):
 
-        self.x = screen_width//2
-        self.y = screen_height//2
+        self.x = screen_width // 2
+        self.y = screen_height // 2
         self.width = 20
         self.height = 20
         self.head = None
@@ -69,6 +73,10 @@ class Snake(object):
         self.head_color = pg.Color(220, 20, 60)
         self.body_color = pg.Color(57, 255, 20)
         self.outline_color = pg.Color(0, 0, 0)
+
+        # Initialize the snake with a single segment (the head)
+        self.body.appendleft([self.x, self.y])
+        self.segment.appendleft(pg.Rect(self.x, self.y, self.width, self.height))
 
     # Draws the snake's head and body segments on the screen
     def draw_snake(self, surface):
@@ -103,20 +111,26 @@ class Snake(object):
             count += 1
 
         # Checks if the head of the snake lies outside of the boundaries of the window
-        if self.y < 0 or self.y > screen_height - self.height or self.x < 0 or self.x > screen_width - self.width:
+        if self.y < 0 or self.y + self.height > screen_height or self.x < 0 or self.x + self.width > screen_width:
             return True
+
+        return False
 
     # Allows the snake to move and follow the coordinates of the hamiltonian cycle
     def movement(self):
 
         if self.direction == 'up':
             self.y -= self.speed
-        if self.direction == 'down':
+        elif self.direction == 'down':
             self.y += self.speed
-        if self.direction == 'right':
+        elif self.direction == 'right':
             self.x += self.speed
-        if self.direction == 'left':
+        elif self.direction == 'left':
             self.x -= self.speed
+
+        # Ensure the snake's head does not move out of bounds
+        self.x = max(0, min(self.x, screen_width - self.width))
+        self.y = max(0, min(self.y, screen_height - self.height))
 
         # Movement is simulated by removing the tail block and adding a block that overlaps with the snake head
         if len(self.body) > 0:
@@ -156,10 +170,15 @@ class Snake(object):
 def gameplay(fruit, snake, cycle):
 
     # Identifies the starting position of the snake
-    position = (int(snake.x/snake.width), int(snake.y/snake.height))
+    position = (int(snake.x / snake.width), int(snake.y / snake.height))
 
     # Identifies the position in the hamiltonian cycle at which the snake begins
-    index = cycle.index(position)
+    try:
+        index = cycle.index(position)
+    except ValueError:
+        print(f"Initial position {position} not found in the Hamiltonian cycle.")
+        pg.quit()
+        sys.exit()
 
     length = len(cycle)
     run = True
@@ -169,7 +188,7 @@ def gameplay(fruit, snake, cycle):
 
         # Controls the frame rate of the graphics to make movement smooth and modify the speed of the simulation
         clock = pg.time.Clock()
-        clock.tick(15)
+        clock.tick(45)
 
         # If the user clicks the exit button the program closes
         for event in pg.event.get():
@@ -190,13 +209,12 @@ def gameplay(fruit, snake, cycle):
 
         # Decide whether to attempt a shortcut
         take_shortcut = False
+        path = None
         if randint(0, 100) < shortcut_probability * 100:
             # Attempt to find a safe path to the fruit
             path = find_shortest_safe_path(snake, fruit)
             if path:
                 take_shortcut = True
-        else:
-            path = None
 
         if take_shortcut and path and len(path) > 1:
             # Follow the path towards the fruit
@@ -213,7 +231,8 @@ def gameplay(fruit, snake, cycle):
                 index = -1  # Will be incremented to 0
 
             direction = get_direction_from_positions(position, next_pos)
-            snake.change_direction(direction)
+            if direction:
+                snake.change_direction(direction)
             position = next_pos
             index += 1
         # --- Shortcut Logic End ---
@@ -221,26 +240,26 @@ def gameplay(fruit, snake, cycle):
         # Changes the coordinates of the snake's position
         snake.movement()
 
-        # If the snake's head collides with a fruit
+        # --- Reordered Collision Checks ---
+        # First, check for fruit collision
         if fruit.fruit_collision(snake.head):
-
             # A new fruit is generated and the size of the snake is increased by 1
             if len(snake.body) < length:
-                fruit.fruit_position()
+                fruit.fruit_position(snake)
                 snake.snake_size()
-
-            # Once the snake fills up the entire grid there are no more positions for the fruit
-            # The game ends and closes
             else:
+                # Once the snake fills up the entire grid there are no more positions for the fruit
+                # The game ends and closes
                 time.sleep(3)
                 pg.quit()
                 sys.exit()
-
-        # Ends the game if the snakes collides with itself or the boundaries
-        if snake.boundary_collision():
+        # Only check for boundary collision if no fruit collision occurred
+        elif snake.boundary_collision():
+            # Ends the game if the snake collides with itself or the boundaries
             time.sleep(3)
             pg.quit()
             sys.exit()
+        # --------------------------------
 
         # Draws all elements on the window
         pg.display.update()
@@ -291,11 +310,22 @@ def find_shortest_safe_path(snake, fruit):
     for segment in snake.body:
         x = segment[0] // snake.width
         y = segment[1] // snake.height
-        grid[y][x] = 1  # 1 represents snake's body
+        if 0 <= x < grid_width and 0 <= y < grid_height:
+            grid[y][x] = 1  # 1 represents snake's body
+        else:
+            print(f"Warning: Snake segment out of bounds at ({x}, {y})")
 
     # BFS to find the shortest path
     start = (snake.x // snake.width, snake.y // snake.height)
     end = (fruit.x // fruit.width, fruit.y // fruit.height)
+
+    # Validate start and end positions
+    if not (0 <= start[0] < grid_width and 0 <= start[1] < grid_height):
+        print(f"Error: Snake's start position {start} is out of bounds.")
+        return None
+    if not (0 <= end[0] < grid_width and 0 <= end[1] < grid_height):
+        print(f"Error: Fruit's end position {end} is out of bounds.")
+        return None
 
     queue = deque()
     queue.append((start, [start]))
@@ -310,9 +340,10 @@ def find_shortest_safe_path(snake, fruit):
         neighbors = get_neighbors(current_pos, grid_width, grid_height)
         for neighbor in neighbors:
             x, y = neighbor
-            if grid[y][x] == 0 and neighbor not in visited:
-                visited.add(neighbor)
-                queue.append((neighbor, path + [neighbor]))
+            if (0 <= x < grid_width) and (0 <= y < grid_height):
+                if grid[y][x] == 0 and neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, path + [neighbor]))
 
     # No path found
     return None
