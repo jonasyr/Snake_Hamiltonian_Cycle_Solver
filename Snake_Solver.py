@@ -18,7 +18,7 @@ os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0, 30)
 # Initialize Tkinter
 root = tk.Tk()
 root.title("Control Panel")
-root.geometry("350x50+810+30")  # Set size and position beside the Pygame window
+root.geometry("450x50+810+30")  # Set size and position beside the Pygame window
 
 # Speed control variable
 speed_var = tk.IntVar(value=15)
@@ -32,6 +32,18 @@ speed_slider.pack(side=tk.LEFT, padx=5, pady=5)
 # Speed value display
 speed_value_label = ttk.Label(root, text="15")
 speed_value_label.pack(side=tk.LEFT, padx=5, pady=5)
+
+# Debugging mode variable
+debug_mode_var = tk.BooleanVar(value=False)
+
+# Debugging mode button
+def toggle_debug_mode():
+    debug_mode_var.set(not debug_mode_var.get())
+    debug_button.config(text="Disable Debug" if debug_mode_var.get() else "Enable Debug")
+
+debug_button = ttk.Button(root, text="Enable Debug", command=toggle_debug_mode)
+debug_button.pack(side=tk.LEFT, padx=5, pady=5)
+
 
 # Update the speed value display as the slider is moved
 def update_speed_label(event):
@@ -247,6 +259,8 @@ def gameplay(fruit, snake, cycle):
 
     # Initialize shortcut path
     current_shortcut_path = None
+    simulated_paths = []  # For visual debugging
+    potential_collisions = []  # For visualizing potential collisions
 
     # Loop simulates the movement of the snake and controls game mechanics
     while run and not stop_game.is_set():
@@ -268,6 +282,10 @@ def gameplay(fruit, snake, cycle):
             draw_hamiltonian_cycle(window, cycle, snake)  # Draw the Hamiltonian cycle if enabled
         fruit.draw_fruit(window)
         snake.draw_snake(window)
+
+        if debug_mode_var.get():
+            draw_simulated_paths(window, simulated_paths, snake)  # Draw simulated paths if debugging is enabled
+            draw_potential_collisions(window, potential_collisions, snake)  # Draw potential collisions if debugging is enabled
 
         if current_shortcut_path:
             # Follow the next step in the shortcut path
@@ -305,6 +323,8 @@ def gameplay(fruit, snake, cycle):
                     stop_game.set()
                     pg.quit()
                     return
+                simulated_paths.clear()  # Clear simulated paths after completing the shortcut
+                potential_collisions.clear()  # Clear potential collisions after completing the shortcut
         else:
             # --- Shortcut Logic Start ---
             # Determine whether to take a shortcut based on snake's length
@@ -320,7 +340,8 @@ def gameplay(fruit, snake, cycle):
                 path = find_shortest_safe_path(snake, fruit)
                 if path:
                     # Perform safety check
-                    if is_safe_shortcut(snake, path, cycle):
+                    is_safe, potential_collisions = is_safe_shortcut(snake, path, cycle)
+                    if is_safe:
                         take_shortcut = True
                     else:
                         # Try to extend the shortcut until it's safe
@@ -332,6 +353,8 @@ def gameplay(fruit, snake, cycle):
             if take_shortcut and path and len(path) > 1:
                 # Initialize the shortcut path
                 current_shortcut_path = deque(path[1:])  # Exclude the current position
+                if debug_mode_var.get():
+                    simulated_paths.append(list(current_shortcut_path))  # Store the path for debugging
             else:
                 # Follow the Hamiltonian cycle
                 if index + 1 < length:
@@ -371,6 +394,20 @@ def gameplay(fruit, snake, cycle):
 
         # Draws all elements on the window
         pg.display.update()
+
+
+def draw_potential_collisions(surface, collisions, snake):
+    for pos in collisions:
+        x = pos[0]
+        y = pos[1]
+        pg.draw.rect(surface, pg.Color(255, 255, 0), (x, y, snake.width, snake.height), 1)  # Yellow outline for collisions
+
+def draw_simulated_paths(surface, paths, snake):
+    for path in paths:
+        for pos in path:
+            x = pos[0] * snake.width
+            y = pos[1] * snake.height
+            pg.draw.rect(surface, pg.Color(255, 0, 0), (x, y, snake.width, snake.height), 1)  # Red outline for paths
 
 def get_direction(snake, next_cell):
     current_x = int(snake.x / snake.width)
@@ -465,6 +502,7 @@ def is_safe_shortcut(snake, path, cycle):
     simulated_body = deque(snake.body)
     simulated_segment = deque(snake.segment)
     simulated_length = snake.length()
+    potential_collisions = []
 
     for pos in path[1:]:  # Skip the current position
         simulated_body.appendleft([pos[0] * snake.width, pos[1] * snake.height])
@@ -476,7 +514,7 @@ def is_safe_shortcut(snake, path, cycle):
     try:
         cycle_index = cycle.index(new_head)
     except ValueError:
-        return False  # Position not found in cycle
+        return False, potential_collisions  # Position not found in cycle
 
     # Perform lookahead simulation
     steps_to_simulate = simulated_length  # Simulate up to the snake's length
@@ -486,14 +524,15 @@ def is_safe_shortcut(snake, path, cycle):
         next_pos_world = [next_pos[0] * snake.width, next_pos[1] * snake.height]
 
         if next_pos_world in simulated_body:
-            return False  # Collision detected
+            potential_collisions.append(next_pos_world)
+            return False, potential_collisions  # Collision detected
 
         simulated_body.appendleft(next_pos_world)
         if len(simulated_body) > simulated_length:
             simulated_body.pop()
 
     # No collision detected in the lookahead
-    return True
+    return True, potential_collisions
 
 
 def extend_shortcut_until_safe(snake, path, cycle):
