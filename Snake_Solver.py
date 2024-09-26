@@ -24,8 +24,8 @@ class Fruit(object):
         self.radius = 10
 
         # The initial position of the fruit is placed randomly on the screen
-        self.x = randint(0, screen_width / self.width - 1) * self.width
-        self.y = randint(0, screen_height / self.height - 1) * self.height
+        self.x = randint(0, int(screen_width / self.width) - 1) * self.width
+        self.y = randint(0, int(screen_height / self.height) - 1) * self.height
 
     # Prints the fruit on the screen
     def draw_fruit(self, surface):
@@ -45,8 +45,8 @@ class Fruit(object):
         while flag:
 
             # The position of the fruit is chosen randomly
-            self.x = randint(0, screen_width/self.width - 1) * self.width
-            self.y = randint(0, screen_height/self.height - 1) * self.height
+            self.x = randint(0, int(screen_width/self.width) - 1) * self.width
+            self.y = randint(0, int(screen_height/self.height) - 1) * self.height
 
             # Checks whether the new fruit location is already occupied by the snake's body
             if snake.empty_space(self.x, self.y):
