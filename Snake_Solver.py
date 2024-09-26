@@ -6,8 +6,8 @@ import os
 from collections import deque
 
 # Used to modify the window size, values must be a multiple of 40
-screen_width = 600
-screen_height = 400
+screen_width = 800
+screen_height = 600
 
 # Controls where the window appears on the screen
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0, 30)
@@ -145,6 +145,10 @@ class Snake(object):
             return True
         else:
             return False
+        
+    # Returns the length of the snake
+    def length(self):
+        return len(self.body) + 1  # +1 for the head
 
 
 # Controls the graphics
@@ -152,7 +156,7 @@ class Snake(object):
 def gameplay(fruit, snake, cycle):
 
     # Identifies the starting position of the snake
-    position = (int(snake.x/20), int(snake.y/20))
+    position = (int(snake.x/snake.width), int(snake.y/snake.height))
 
     # Identifies the position in the hamiltonian cycle at which the snake begins
     index = cycle.index(position)
@@ -165,7 +169,7 @@ def gameplay(fruit, snake, cycle):
 
         # Controls the frame rate of the graphics to make movement smooth and modify the speed of the simulation
         clock = pg.time.Clock()
-        clock.tick(50)
+        clock.tick(15)
 
         # If the user clicks the exit button the program closes
         for event in pg.event.get():
@@ -178,39 +182,41 @@ def gameplay(fruit, snake, cycle):
         fruit.draw_fruit(window)
         snake.draw_snake(window)
 
-        # Finds the direction for the snake's next movement according to the calculated hamiltonian cycle
-        if index + 1 < length and cycle[index+1] == (position[0] + 1, position[1]):
-            snake.change_direction('right')
-            position = (position[0] + 1, position[1])
-        elif index + 1 < length and cycle[index+1] == (position[0] - 1, position[1]):
-            snake.change_direction('left')
-            position = (position[0] - 1, position[1])
-        elif index + 1 < length and cycle[index+1] == (position[0], position[1] + 1):
-            snake.change_direction('down')
-            position = (position[0], position[1] + 1)
-        elif index + 1 < length and cycle[index+1] == (position[0], position[1] - 1):
-            snake.change_direction('up')
-            position = (position[0], position[1] - 1)
+        # --- Shortcut Logic Start ---
+        # Determine whether to take a shortcut based on snake's length
+        snake_len = snake.length()
+        max_length = (screen_width // snake.width) * (screen_height // snake.height)
+        shortcut_probability = max(0, (max_length - snake_len) / max_length)
 
-        # Takes care of boundary case where the next index of the cycle does not exist
-        # The next position is 1st index of the cycle
-        # Otherwise the index is incremented by 1
-        if index == length - 1:
-            if cycle[0] == (position[0] + 1, position[1]):
-                snake.change_direction('right')
-                position = (position[0] + 1, position[1])
-            elif cycle[0] == (position[0] - 1, position[1]):
-                snake.change_direction('left')
-                position = (position[0] - 1, position[1])
-            elif cycle[0] == (position[0], position[1] + 1):
-                snake.change_direction('down')
-                position = (position[0], position[1] + 1)
-            elif cycle[0] == (position[0], position[1] - 1):
-                snake.change_direction('up')
-                position = (position[0], position[1] - 1)
-            index = 0
+        # Decide whether to attempt a shortcut
+        take_shortcut = False
+        if randint(0, 100) < shortcut_probability * 100:
+            # Attempt to find a safe path to the fruit
+            path = find_shortest_safe_path(snake, fruit)
+            if path:
+                take_shortcut = True
         else:
+            path = None
+
+        if take_shortcut and path and len(path) > 1:
+            # Follow the path towards the fruit
+            next_cell = path[1]  # path[0] is the current position
+            direction = get_direction(snake, next_cell)
+            snake.change_direction(direction)
+            position = next_cell
+        else:
+            # Follow the Hamiltonian cycle
+            if index + 1 < length:
+                next_pos = cycle[index + 1]
+            else:
+                next_pos = cycle[0]
+                index = -1  # Will be incremented to 0
+
+            direction = get_direction_from_positions(position, next_pos)
+            snake.change_direction(direction)
+            position = next_pos
             index += 1
+        # --- Shortcut Logic End ---
 
         # Changes the coordinates of the snake's position
         snake.movement()
@@ -238,6 +244,92 @@ def gameplay(fruit, snake, cycle):
 
         # Draws all elements on the window
         pg.display.update()
+
+def get_direction(snake, next_cell):
+    current_x = int(snake.x / snake.width)
+    current_y = int(snake.y / snake.height)
+    next_x, next_y = next_cell
+
+    if next_x == current_x + 1:
+        return 'right'
+    elif next_x == current_x - 1:
+        return 'left'
+    elif next_y == current_y + 1:
+        return 'down'
+    elif next_y == current_y - 1:
+        return 'up'
+    else:
+        return snake.direction  # No change
+
+
+def get_direction_from_positions(current_pos, next_pos):
+    current_x, current_y = current_pos
+    next_x, next_y = next_pos
+
+    if next_x == current_x + 1:
+        return 'right'
+    elif next_x == current_x - 1:
+        return 'left'
+    elif next_y == current_y + 1:
+        return 'down'
+    elif next_y == current_y - 1:
+        return 'up'
+    else:
+        return None  # Should not happen
+
+
+def find_shortest_safe_path(snake, fruit):
+    from collections import deque
+
+    grid_width = screen_width // snake.width
+    grid_height = screen_height // snake.height
+
+    # Initialize the grid
+    grid = [[0 for _ in range(grid_width)] for _ in range(grid_height)]
+
+    # Mark snake's body on the grid
+    for segment in snake.body:
+        x = segment[0] // snake.width
+        y = segment[1] // snake.height
+        grid[y][x] = 1  # 1 represents snake's body
+
+    # BFS to find the shortest path
+    start = (snake.x // snake.width, snake.y // snake.height)
+    end = (fruit.x // fruit.width, fruit.y // fruit.height)
+
+    queue = deque()
+    queue.append((start, [start]))
+    visited = set()
+    visited.add(start)
+
+    while queue:
+        current_pos, path = queue.popleft()
+        if current_pos == end:
+            # Found a path
+            return path
+        neighbors = get_neighbors(current_pos, grid_width, grid_height)
+        for neighbor in neighbors:
+            x, y = neighbor
+            if grid[y][x] == 0 and neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, path + [neighbor]))
+
+    # No path found
+    return None
+
+
+def get_neighbors(pos, grid_width, grid_height):
+    x, y = pos
+    neighbors = []
+    if x > 0:
+        neighbors.append((x - 1, y))
+    if x < grid_width - 1:
+        neighbors.append((x + 1, y))
+    if y > 0:
+        neighbors.append((x, y - 1))
+    if y < grid_height - 1:
+        neighbors.append((x, y + 1))
+    return neighbors
 
 
 # Uses prim's algorithm to generate a randomized maze using randomized edge weights
@@ -519,8 +611,10 @@ def hamiltonian_cycle(grid_rows, grid_columns, orientation):
 # Generates a path composed of coordinates for the snake to travel along
 def path_generator(graph, cells):
 
-    # The starting position for the path is at cell (0, 0)
-    path = [(0, 0)]
+    # The starting position for the path is a random cell within the grid
+    start_x = randint(0, max(x for x, y in graph.keys()))
+    start_y = randint(0, max(y for x, y in graph.keys()))
+    path = [(start_x, start_y)]
 
     previous_cell = path[0]
     previous_direction = None
