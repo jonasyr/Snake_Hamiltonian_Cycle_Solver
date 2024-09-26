@@ -322,6 +322,12 @@ def gameplay(fruit, snake, cycle):
                     # Perform safety check
                     if is_safe_shortcut(snake, path, cycle):
                         take_shortcut = True
+                    else:
+                        # Try to extend the shortcut until it's safe
+                        extended_path = extend_shortcut_until_safe(snake, path, cycle)
+                        if extended_path:
+                            path = extended_path
+                            take_shortcut = True
 
             if take_shortcut and path and len(path) > 1:
                 # Initialize the shortcut path
@@ -453,57 +459,74 @@ def find_shortest_safe_path(snake, fruit):
 def is_safe_shortcut(snake, path, cycle):
     """
     Determines if taking the shortcut path is safe.
-    Ensures that after following the path, the snake can continue following the cycle.
-    
-    Parameters:
-    - snake: The Snake object.
-    - path: The list of positions (tuples) representing the shortcut path.
-    - cycle: The Hamiltonian cycle path.
-    
-    Returns:
-    - True if the shortcut is safe, False otherwise.
+    Ensures that after following the path, the snake can continue following the cycle without collisions.
     """
     # Simulate the snake's body after taking the shortcut
     simulated_body = deque(snake.body)
     simulated_segment = deque(snake.segment)
-    
+    simulated_length = snake.length()
+
     for pos in path[1:]:  # Skip the current position
-        simulated_body.appendleft(list(pos))
-        simulated_segment.appendleft(pg.Rect(pos[0] * snake.width, pos[1] * snake.height, snake.width, snake.height))
-        if len(simulated_body) > snake.length():
+        simulated_body.appendleft([pos[0] * snake.width, pos[1] * snake.height])
+        if len(simulated_body) > simulated_length:
             simulated_body.pop()
-            simulated_segment.pop()
-    
-    # Find the new head position after the shortcut
-    new_head = path[-1]
-    
-    # Check if the new head position is on the cycle
-    if new_head not in cycle:
-        return False  # Shortcut leads off the cycle
-    
+
     # Find the index of the new head in the cycle
+    new_head = path[-1]
     try:
-        new_index = cycle.index(new_head)
+        cycle_index = cycle.index(new_head)
     except ValueError:
         return False  # Position not found in cycle
-    
-    # Simulate following the cycle from the new index
-    simulated_index = new_index
-    for _ in range(len(cycle)):
-        next_index = (simulated_index + 1) % len(cycle)
-        next_pos = cycle[next_index]
-        if list(next_pos) in simulated_body:
-            return False  # Collision detected in cycle
-        # Simulate the snake moving forward
-        simulated_body.appendleft(list(next_pos))
-        simulated_segment.appendleft(pg.Rect(next_pos[0] * snake.width, next_pos[1] * snake.height, snake.width, snake.height))
-        if len(simulated_body) > snake.length():
+
+    # Perform lookahead simulation
+    steps_to_simulate = simulated_length  # Simulate up to the snake's length
+    for step in range(steps_to_simulate):
+        cycle_index = (cycle_index + 1) % len(cycle)
+        next_pos = cycle[cycle_index]
+        next_pos_world = [next_pos[0] * snake.width, next_pos[1] * snake.height]
+
+        if next_pos_world in simulated_body:
+            return False  # Collision detected
+
+        simulated_body.appendleft(next_pos_world)
+        if len(simulated_body) > simulated_length:
             simulated_body.pop()
-            simulated_segment.pop()
-        simulated_index = next_index
-    
-    # If no collision detected, the shortcut is safe
+
+    # No collision detected in the lookahead
     return True
+
+
+def extend_shortcut_until_safe(snake, path, cycle):
+    """
+    Extends the shortcut path until it's safe to rejoin the cycle.
+    """
+    max_extension = len(cycle)  # Maximum possible extension
+    current_extension = 0
+
+    # Start from the last position in the current path
+    last_pos = path[-1]
+
+    while current_extension < max_extension:
+        # Move to the next position in the cycle
+        try:
+            cycle_index = cycle.index(last_pos)
+        except ValueError:
+            return None  # Cannot find the position in the cycle
+
+        cycle_index = (cycle_index + 1) % len(cycle)
+        next_pos = cycle[cycle_index]
+        path.append(next_pos)
+        current_extension += 1
+
+        # Check if the extended path is safe
+        if is_safe_shortcut(snake, path, cycle):
+            return path  # Found a safe extended path
+
+        last_pos = next_pos
+
+    # No safe extension found
+    return None
+
 
 
 def get_neighbors(pos, grid_width, grid_height):
