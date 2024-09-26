@@ -183,12 +183,15 @@ def gameplay(fruit, snake, cycle):
     length = len(cycle)
     run = True
 
+    # Initialize shortcut path
+    current_shortcut_path = None
+
     # Loop simulates the movement of the snake and controls game mechanics
     while run:
 
         # Controls the frame rate of the graphics to make movement smooth and modify the speed of the simulation
         clock = pg.time.Clock()
-        clock.tick(45)
+        clock.tick(60)
 
         # If the user clicks the exit button the program closes
         for event in pg.event.get():
@@ -201,64 +204,93 @@ def gameplay(fruit, snake, cycle):
         fruit.draw_fruit(window)
         snake.draw_snake(window)
 
-        # --- Shortcut Logic Start ---
-        # Determine whether to take a shortcut based on snake's length
-        snake_len = snake.length()
-        max_length = (screen_width // snake.width) * (screen_height // snake.height)
-        shortcut_probability = max(0, (max_length - snake_len) / max_length)
-
-        # Decide whether to attempt a shortcut
-        take_shortcut = False
-        path = None
-        if randint(0, 100) < shortcut_probability * 100:
-            # Attempt to find a safe path to the fruit
-            path = find_shortest_safe_path(snake, fruit)
-            if path:
-                take_shortcut = True
-
-        if take_shortcut and path and len(path) > 1:
-            # Follow the path towards the fruit
-            next_cell = path[1]  # path[0] is the current position
+        if current_shortcut_path:
+            # Follow the next step in the shortcut path
+            next_cell = current_shortcut_path.popleft()
             direction = get_direction(snake, next_cell)
             snake.change_direction(direction)
+            snake.movement()
             position = next_cell
-        else:
-            # Follow the Hamiltonian cycle
-            if index + 1 < length:
-                next_pos = cycle[index + 1]
-            else:
-                next_pos = cycle[0]
-                index = -1  # Will be incremented to 0
 
-            direction = get_direction_from_positions(position, next_pos)
-            if direction:
-                snake.change_direction(direction)
-            position = next_pos
-            index += 1
-        # --- Shortcut Logic End ---
+            # Check for fruit collision at each step
+            if fruit.fruit_collision(snake.head):
+                if len(snake.body) < length:
+                    fruit.fruit_position(snake)
+                    snake.snake_size()
+                    current_shortcut_path = None  # Reset shortcut after eating
+                else:
+                    time.sleep(3)
+                    pg.quit()
+                    sys.exit()
 
-        # Changes the coordinates of the snake's position
-        snake.movement()
-
-        # --- Reordered Collision Checks ---
-        # First, check for fruit collision
-        if fruit.fruit_collision(snake.head):
-            # A new fruit is generated and the size of the snake is increased by 1
-            if len(snake.body) < length:
-                fruit.fruit_position(snake)
-                snake.snake_size()
-            else:
-                # Once the snake fills up the entire grid there are no more positions for the fruit
-                # The game ends and closes
+            # Check for boundary collision
+            if snake.boundary_collision():
                 time.sleep(3)
                 pg.quit()
                 sys.exit()
-        # Only check for boundary collision if no fruit collision occurred
-        elif snake.boundary_collision():
-            # Ends the game if the snake collides with itself or the boundaries
-            time.sleep(3)
-            pg.quit()
-            sys.exit()
+
+            # After moving, check if shortcut is complete
+            if not current_shortcut_path:
+                try:
+                    index = cycle.index(position)
+                except ValueError:
+                    print(f"Position after shortcut {position} not found in the Hamiltonian cycle.")
+                    pg.quit()
+                    sys.exit()
+        else:
+            # --- Shortcut Logic Start ---
+            # Determine whether to take a shortcut based on snake's length
+            snake_len = snake.length()
+            max_length = (screen_width // snake.width) * (screen_height // snake.height)
+            shortcut_probability = max(0, (max_length - snake_len) / max_length)
+
+            # Decide whether to attempt a shortcut
+            take_shortcut = False
+            path = None
+            if randint(0, 100) < shortcut_probability * 100:
+                # Attempt to find a safe path to the fruit
+                path = find_shortest_safe_path(snake, fruit)
+                if path:
+                    # Perform safety check
+                    if is_safe_shortcut(snake, path, cycle):
+                        take_shortcut = True
+
+            if take_shortcut and path and len(path) > 1:
+                # Initialize the shortcut path
+                current_shortcut_path = deque(path[1:])  # Exclude the current position
+            else:
+                # Follow the Hamiltonian cycle
+                if index + 1 < length:
+                    next_pos = cycle[index + 1]
+                else:
+                    next_pos = cycle[0]
+                    index = -1  # Will be incremented to 0
+
+                direction = get_direction_from_positions(position, next_pos)
+                if direction:
+                    snake.change_direction(direction)
+                position = next_pos
+                index += 1
+
+                # Move the snake
+                snake.movement()
+
+
+                # Check for fruit collision at each step
+                if fruit.fruit_collision(snake.head):
+                    if len(snake.body) < length:
+                        fruit.fruit_position(snake)
+                        snake.snake_size()
+                    else:
+                        time.sleep(3)
+                        pg.quit()
+                        sys.exit()
+
+                # Check for boundary collision
+                elif snake.boundary_collision():
+                    time.sleep(3)
+                    pg.quit()
+                    sys.exit()
         # --------------------------------
 
         # Draws all elements on the window
@@ -347,6 +379,61 @@ def find_shortest_safe_path(snake, fruit):
 
     # No path found
     return None
+
+def is_safe_shortcut(snake, path, cycle):
+    """
+    Determines if taking the shortcut path is safe.
+    Ensures that after following the path, the snake can continue following the cycle.
+    
+    Parameters:
+    - snake: The Snake object.
+    - path: The list of positions (tuples) representing the shortcut path.
+    - cycle: The Hamiltonian cycle path.
+    
+    Returns:
+    - True if the shortcut is safe, False otherwise.
+    """
+    # Simulate the snake's body after taking the shortcut
+    simulated_body = deque(snake.body)
+    simulated_segment = deque(snake.segment)
+    
+    for pos in path[1:]:  # Skip the current position
+        simulated_body.appendleft(list(pos))
+        simulated_segment.appendleft(pg.Rect(pos[0] * snake.width, pos[1] * snake.height, snake.width, snake.height))
+        if len(simulated_body) > snake.length():
+            simulated_body.pop()
+            simulated_segment.pop()
+    
+    # Find the new head position after the shortcut
+    new_head = path[-1]
+    
+    # Check if the new head position is on the cycle
+    if new_head not in cycle:
+        return False  # Shortcut leads off the cycle
+    
+    # Find the index of the new head in the cycle
+    try:
+        new_index = cycle.index(new_head)
+    except ValueError:
+        return False  # Position not found in cycle
+    
+    # Simulate following the cycle from the new index
+    simulated_index = new_index
+    for _ in range(len(cycle)):
+        next_index = (simulated_index + 1) % len(cycle)
+        next_pos = cycle[next_index]
+        if list(next_pos) in simulated_body:
+            return False  # Collision detected in cycle
+        # Simulate the snake moving forward
+        simulated_body.appendleft(list(next_pos))
+        simulated_segment.appendleft(pg.Rect(next_pos[0] * snake.width, next_pos[1] * snake.height, snake.width, snake.height))
+        if len(simulated_body) > snake.length():
+            simulated_body.pop()
+            simulated_segment.pop()
+        simulated_index = next_index
+    
+    # If no collision detected, the shortcut is safe
+    return True
 
 
 def get_neighbors(pos, grid_width, grid_height):
