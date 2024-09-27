@@ -3,10 +3,13 @@ import sys
 from random import randint
 import time
 import os
-from collections import deque
+from collections import deque, Counter
 import tkinter as tk
 from tkinter import ttk
 import threading
+import psutil
+import heapq
+
 
 # Used to modify the window size, values must be a multiple of 40
 screen_width = 800
@@ -18,23 +21,26 @@ os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0, 30)
 # Initialize Tkinter
 root = tk.Tk()
 root.title("Control Panel")
-root.geometry("450x50+810+30")  # Set size and position beside the Pygame window
+root.geometry("500x150+810+30")  # Set size and position beside the Pygame window
 
 # Speed control variable
 speed_var = tk.IntVar(value=15)
 
 # Speed control slider
 speed_label = ttk.Label(root, text="Speed:")
-speed_label.pack(side=tk.LEFT, padx=5, pady=5)
+speed_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
 speed_slider = ttk.Scale(root, from_=1, to=60, variable=speed_var, orient=tk.HORIZONTAL)
-speed_slider.pack(side=tk.LEFT, padx=5, pady=5)
-
-# Speed value display
+speed_slider.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 speed_value_label = ttk.Label(root, text="15")
-speed_value_label.pack(side=tk.LEFT, padx=5, pady=5)
+speed_value_label.grid(row=0, column=2, padx=5, pady=5, sticky="w")
 
 # Debugging mode variable
 debug_mode_var = tk.BooleanVar(value=False)
+show_paths_var = tk.BooleanVar(value=False)
+
+# Add checkbox to control panel
+show_paths_checkbox = ttk.Checkbutton(root, text="Show Paths", variable=show_paths_var)
+show_paths_checkbox.grid(row=1, column=3, padx=5, pady=5, sticky="w")
 
 # Debugging mode button
 def toggle_debug_mode():
@@ -42,14 +48,7 @@ def toggle_debug_mode():
     debug_button.config(text="Disable Debug" if debug_mode_var.get() else "Enable Debug")
 
 debug_button = ttk.Button(root, text="Enable Debug", command=toggle_debug_mode)
-debug_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-
-# Update the speed value display as the slider is moved
-def update_speed_label(event):
-    speed_value_label.config(text=str(speed_var.get()))
-
-speed_slider.bind("<Motion>", update_speed_label)
+debug_button.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
 
 # Show/Hide Hamiltonian cycle variable
 show_cycle_var = tk.BooleanVar(value=True)
@@ -60,9 +59,8 @@ def toggle_cycle():
     toggle_button.config(text="Hide Cycle" if show_cycle_var.get() else "Show Cycle")
 
 toggle_button = ttk.Button(root, text="Hide Cycle", command=toggle_cycle)
-toggle_button.pack(side=tk.LEFT, padx=5, pady=5)
+toggle_button.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
 
-# Flag to indicate when to stop the Pygame loop
 stop_game = threading.Event()
 
 # Close button
@@ -71,8 +69,41 @@ def close_program():
     root.quit()  # Use root.quit() instead of root.destroy() to ensure the main loop exits
 
 close_button = ttk.Button(root, text="Close", command=close_program)
-close_button.pack(side=tk.LEFT, padx=5, pady=5)
+close_button.grid(row=1, column=2, padx=5, pady=5, sticky="ew")
 
+# Performance monitoring labels
+cpu_label = ttk.Label(root, text="CPU Usage: 0%")
+cpu_label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
+memory_label = ttk.Label(root, text="Memory Usage: 0%")
+memory_label.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+
+# Function to update performance metrics
+def update_performance_metrics():
+    while not stop_game.is_set():
+        cpu_usage = psutil.cpu_percent(interval=1)
+        memory_info = psutil.virtual_memory()
+        memory_usage = memory_info.percent
+
+        # Update the labels in the Tkinter main thread
+        root.after(0, lambda: cpu_label.config(text=f"CPU Usage: {cpu_usage}%"))
+        root.after(0, lambda: memory_label.config(text=f"Memory Usage: {memory_usage}%"))
+
+        # Sleep for a few seconds before the next update
+        time.sleep(5)
+
+# Start the performance monitoring in a separate thread
+performance_thread = threading.Thread(target=update_performance_metrics)
+performance_thread.daemon = True
+performance_thread.start()
+
+# Update the speed value display as the slider is moved
+def update_speed_label(event):
+    speed_value_label.config(text=str(speed_var.get()))
+
+speed_slider.bind("<Motion>", update_speed_label)
+
+# Flag to indicate when to stop the Pygame loop
+stop_game = threading.Event()
 
 # Function to update speed
 def update_speed():
@@ -86,11 +117,8 @@ def update_speed():
 
 speed_slider.bind("<Return>", lambda event: update_speed())
 
-
 class Fruit(object):
-
     def __init__(self):
-
         self.color = pg.Color(139, 0, 0)
         self.width = 20
         self.height = 20
@@ -103,38 +131,27 @@ class Fruit(object):
 
     # Prints the fruit on the screen
     def draw_fruit(self, surface):
-
         self.fruit = pg.Rect(self.x, self.y, self.width, self.height)
         pg.draw.circle(surface, self.color, (self.x + self.radius, self.y + self.radius), self.radius)
 
     # Checks whether the snake's head collides with the fruit
     def fruit_collision(self, head):
-
         return self.fruit.colliderect(head)
 
     # Finds a new location for a fruit after a collision occurs
     def fruit_position(self, snake):
-
         flag = True
         while flag:
-
             # The position of the fruit is chosen randomly
             self.x = randint(0, int(screen_width / self.width) - 1) * self.width
             self.y = randint(0, int(screen_height / self.height) - 1) * self.height
-
-            # # Avoid placing on the boundary by limiting the random range
-            # self.x = randint(1, int((screen_width / self.width) - 2)) * self.width
-            # self.y = randint(1, int((screen_height / self.height) - 2)) * self.height
 
             # Checks whether the new fruit location is already occupied by the snake's body
             if snake.empty_space(self.x, self.y):
                 flag = False
 
-
 class Snake(object):
-
     def __init__(self):
-
         self.x = screen_width // 2
         self.y = screen_height // 2
         self.width = 20
@@ -154,18 +171,19 @@ class Snake(object):
 
     # Draws the snake's head and body segments on the screen
     def draw_snake(self, surface):
-
-        if len(self.body) > 0:
-            for unit in self.segment:
-                pg.draw.rect(surface, self.body_color, unit)
-                pg.draw.rect(surface, self.outline_color, unit, 1)
+        # Update the head position
         self.head = pg.Rect(self.x, self.y, self.width, self.height)
         pg.draw.rect(surface, self.head_color, self.head)
         pg.draw.rect(surface, self.outline_color, self.head, 1)
+        
+        # Draw the body segments
+        if len(self.body) > 1:
+            for unit in list(self.segment)[1:]:  # Skip the head
+                pg.draw.rect(surface, self.body_color, unit)
+                pg.draw.rect(surface, self.outline_color, unit, 1)
 
     # Adds a segment to the snake if a collision between the head and fruit occurs
     def snake_size(self):
-
         if len(self.body) != 0:
             index = len(self.body) - 1
             x = self.body[index][0]
@@ -175,7 +193,6 @@ class Snake(object):
 
     # Ends the game in the case where the snake collides with the boundaries or the head collides with a body segment
     def boundary_collision(self):
-
         # If the head of the snake collides with a body segment the function returns True
         # The head collides with the first 2 body segments, count prevents it from registering as a collision
         count = 0
@@ -192,7 +209,6 @@ class Snake(object):
 
     # Allows the snake to move and follow the coordinates of the hamiltonian cycle
     def movement(self):
-
         if self.direction == 'up':
             self.y -= self.speed
         elif self.direction == 'down':
@@ -216,19 +232,17 @@ class Snake(object):
     # Changes the orientation of movement
     # A snake moving in one direction cannot move in the opposite direction as it would collide with its body
     def change_direction(self, direction):
-
         if direction == 'up' and self.direction != 'down':
             self.direction = 'up'
-        if direction == 'down' and self.direction != 'up':
+        elif direction == 'down' and self.direction != 'up':
             self.direction = 'down'
-        if direction == 'right' and self.direction != 'left':
+        elif direction == 'right' and self.direction != 'left':
             self.direction = 'right'
-        if direction == 'left' and self.direction != 'right':
+        elif direction == 'left' and self.direction != 'right':
             self.direction = 'left'
 
     # Checks whether a new fruit position conflicts with a body segment of the snake
     def empty_space(self, x_coordinate, y_coordinate):
-
         if [x_coordinate, y_coordinate] not in self.body:
             return True
         else:
@@ -238,15 +252,20 @@ class Snake(object):
     def length(self):
         return len(self.body) + 1  # +1 for the head
 
-
 # Controls the graphics
 # Controls the movement of the snake to follow the hamiltonian cycle
 def gameplay(fruit, snake, cycle):
-
     # Identifies the starting position of the snake
-    position = (int(snake.x / snake.width), int(snake.y / snake.height))
+    position = (snake.x // snake.width, snake.y // snake.height)
 
-    # Identifies the position in the hamiltonian cycle at which the snake begins
+    snake_length = len(snake.body)
+    grid_size = (screen_width // snake.width) * (screen_height // snake.height)
+    max_corner_cuts = 3  # Maximum allowed deviations from the cycle
+    max_depth = 100  # Maximum search depth for pathfinding
+
+    simulated_paths = []  # Store paths for debugging
+
+    # Identifies the position in the Hamiltonian cycle at which the snake begins
     try:
         index = cycle.index(position)
     except ValueError:
@@ -257,50 +276,131 @@ def gameplay(fruit, snake, cycle):
     length = len(cycle)
     run = True
 
-    # Initialize shortcut path
-    current_shortcut_path = None
-    simulated_paths = []  # For visual debugging
-    potential_collisions = []  # For visualizing potential collisions
-
-    # Loop simulates the movement of the snake and controls game mechanics
     while run and not stop_game.is_set():
+        try:
+            # Control frame rate
+            clock = pg.time.Clock()
+            clock.tick(speed_var.get())
 
-        # Controls the frame rate of the graphics to make movement smooth and modify the speed of the simulation
-        clock = pg.time.Clock()
-        clock.tick(speed_var.get())  # Use the speed from the Tkinter slider
+            # Handle events
+            for event in pg.event.get():
+                if event.type == pg.QUIT:
+                    stop_game.set()
+                    pg.quit()
+                    return
 
-        # If the user clicks the exit button the program closes
-        for event in pg.event.get():
-            if event.type == pg.QUIT:
-                stop_game.set()
-                pg.quit()
-                return
+            # Draw elements
+            window.fill(pg.Color(0, 0, 0))
+            if show_cycle_var.get():
+                draw_hamiltonian_cycle(window, cycle, snake)
+            fruit.draw_fruit(window)
+            snake.draw_snake(window)
 
-        # Movement is simulated by making screen black and redrawing the snake and fruit
-        window.fill(pg.Color(0, 0, 0))
-        if show_cycle_var.get():
-            draw_hamiltonian_cycle(window, cycle, snake)  # Draw the Hamiltonian cycle if enabled
-        fruit.draw_fruit(window)
-        snake.draw_snake(window)
+            # Update position calculation
+            position = (snake.x // snake.width, snake.y // snake.height)
+            
+            # Try to find a safe shortcut path to the fruit
+            path_to_fruit = find_shortest_safe_path(snake, fruit, cycle, max_corner_cuts=max_corner_cuts, max_depth=max_depth)
 
-        if debug_mode_var.get():
-            draw_simulated_paths(window, simulated_paths, snake)  # Draw simulated paths if debugging is enabled
-            draw_potential_collisions(window, potential_collisions, snake)  # Draw potential collisions if debugging is enabled
+            if path_to_fruit and len(path_to_fruit) > 1:
+                is_safe = is_safe_shortcut(snake, path_to_fruit, cycle, fruit)
+                if is_safe:
+                    # Take the shortcut
+                    if debug_mode_var.get() and show_paths_var.get():
+                        simulated_paths.clear()
+                        simulated_paths.append(path_to_fruit)  # Store the path for debugging
 
-        if current_shortcut_path:
-            # Follow the next step in the shortcut path
-            next_cell = current_shortcut_path.popleft()
-            direction = get_direction(snake, next_cell)
-            snake.change_direction(direction)
+                    for next_pos in path_to_fruit[1:]:  # Exclude the current position
+                        # Convert grid coordinates to pixel positions
+                        snake.x = next_pos[0] * snake.width
+                        snake.y = next_pos[1] * snake.height
+                        position = next_pos  # Update the current position
+
+                        # Update the snake's body
+                        snake.body.pop()
+                        snake.segment.pop()
+                        snake.body.appendleft([snake.x, snake.y])
+                        snake.segment.appendleft(pg.Rect(snake.x, snake.y, snake.width, snake.height))
+
+                        # Update the head
+                        snake.head = pg.Rect(snake.x, snake.y, snake.width, snake.height)
+
+                        # Check for fruit collision at each step
+                        if fruit.fruit_collision(snake.head):
+                            if len(snake.body) < length:
+                                fruit.fruit_position(snake)
+                                snake.snake_size()
+                                # Update the snake's length and max_corner_cuts
+                                snake_length = len(snake.body)
+                                grid_size = (screen_width // snake.width) * (screen_height // snake.height)
+                                max_corner_cuts = min(3, grid_size // (snake_length + 1))
+                            else:
+                                time.sleep(3)
+                                stop_game.set()
+                                pg.quit()
+                                return
+
+                        # Check for boundary collision
+                        if snake.boundary_collision():
+                            time.sleep(3)
+                            stop_game.set()
+                            pg.quit()
+                            return
+
+                        # Draw elements
+                        window.fill(pg.Color(0, 0, 0))
+                        if show_cycle_var.get():
+                            draw_hamiltonian_cycle(window, cycle, snake)
+                        fruit.draw_fruit(window)
+                        snake.draw_snake(window)
+
+                        if debug_mode_var.get() and show_paths_var.get():
+                            draw_simulated_paths(window, simulated_paths, snake)
+
+                        pg.display.update()
+                        clock.tick(speed_var.get())
+
+                    # Rejoin the cycle
+                    try:
+                        index = cycle.index(position)
+                    except ValueError:
+                        print(f"Position after shortcut {position} not found in the Hamiltonian cycle.")
+                        stop_game.set()
+                        pg.quit()
+                        return
+
+                    index += 1
+                    # Clear the simulated paths after the shortcut is completed
+                    simulated_paths.clear()
+                    continue  # Proceed with the next iteration
+
+            # Follow the Hamiltonian cycle by default
+            if index + 1 < length:
+                next_pos = cycle[index + 1]
+            else:
+                next_pos = cycle[0]
+                index = -1  # Will be incremented to 0
+
+            direction = get_direction_from_positions(position, next_pos, snake.direction)
+
+            # Move along the cycle
+            if direction:
+                snake.change_direction(direction)
+            position = next_pos
+            index += 1
+
+            # Move the snake
             snake.movement()
-            position = next_cell
 
-            # Check for fruit collision at each step
+            # Check for fruit collision
             if fruit.fruit_collision(snake.head):
                 if len(snake.body) < length:
                     fruit.fruit_position(snake)
                     snake.snake_size()
-                    current_shortcut_path = None  # Reset shortcut after eating
+                    # Update the snake's length and max_corner_cuts
+                    snake_length = len(snake.body)
+                    grid_size = (screen_width // snake.width) * (screen_height // snake.height)
+                    max_corner_cuts = min(3, grid_size // (snake_length + 1))
                 else:
                     time.sleep(3)
                     stop_game.set()
@@ -314,100 +414,36 @@ def gameplay(fruit, snake, cycle):
                 pg.quit()
                 return
 
-            # After moving, check if shortcut is complete
-            if not current_shortcut_path:
-                try:
-                    index = cycle.index(position)
-                except ValueError:
-                    print(f"Position after shortcut {position} not found in the Hamiltonian cycle.")
-                    stop_game.set()
-                    pg.quit()
-                    return
-                simulated_paths.clear()  # Clear simulated paths after completing the shortcut
-                potential_collisions.clear()  # Clear potential collisions after completing the shortcut
-        else:
-            # --- Shortcut Logic Start ---
-            # Determine whether to take a shortcut based on snake's length
-            snake_len = snake.length()
-            max_length = (screen_width // snake.width) * (screen_height // snake.height)
-            shortcut_probability = max(0, (max_length - snake_len) / max_length)
+            # Draw simulated paths if debugging mode and show paths are enabled
+            if debug_mode_var.get() and show_paths_var.get():
+                draw_simulated_paths(window, simulated_paths, snake)
 
-            # Decide whether to attempt a shortcut
-            take_shortcut = False
-            path = None
-            if randint(0, 100) < shortcut_probability * 100:
-                # Attempt to find a safe path to the fruit
-                path = find_shortest_safe_path(snake, fruit)
-                if path:
-                    # Perform safety check
-                    is_safe, potential_collisions = is_safe_shortcut(snake, path, cycle)
-                    if is_safe:
-                        take_shortcut = True
-                    else:
-                        # Try to extend the shortcut until it's safe
-                        extended_path = extend_shortcut_until_safe(snake, path, cycle)
-                        if extended_path:
-                            path = extended_path
-                            take_shortcut = True
+            # Update display
+            pg.display.update()
 
-            if take_shortcut and path and len(path) > 1:
-                # Initialize the shortcut path
-                current_shortcut_path = deque(path[1:])  # Exclude the current position
-                if debug_mode_var.get():
-                    simulated_paths.append(list(current_shortcut_path))  # Store the path for debugging
-            else:
-                # Follow the Hamiltonian cycle
-                if index + 1 < length:
-                    next_pos = cycle[index + 1]
-                else:
-                    next_pos = cycle[0]
-                    index = -1  # Will be incremented to 0
+            # Clear simulated paths when not taking a shortcut
+            simulated_paths.clear()
 
-                direction = get_direction_from_positions(position, next_pos)
-                if direction:
-                    snake.change_direction(direction)
-                position = next_pos
-                index += 1
-
-                # Move the snake
-                snake.movement()
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            stop_game.set()
+            pg.quit()
+            return
 
 
-                # Check for fruit collision at each step
-                if fruit.fruit_collision(snake.head):
-                    if len(snake.body) < length:
-                        fruit.fruit_position(snake)
-                        snake.snake_size()
-                    else:
-                        time.sleep(3)
-                        stop_game.set()
-                        pg.quit()
-                        return
-
-                # Check for boundary collision
-                elif snake.boundary_collision():
-                    time.sleep(3)
-                    stop_game.set()
-                    pg.quit()
-                    return
-        # --------------------------------
-
-        # Draws all elements on the window
-        pg.display.update()
-
-
-def draw_potential_collisions(surface, collisions, snake):
-    for pos in collisions:
-        x = pos[0]
-        y = pos[1]
-        pg.draw.rect(surface, pg.Color(255, 255, 0), (x, y, snake.width, snake.height), 1)  # Yellow outline for collisions
 
 def draw_simulated_paths(surface, paths, snake):
     for path in paths:
         for pos in path:
             x = pos[0] * snake.width
             y = pos[1] * snake.height
-            pg.draw.rect(surface, pg.Color(255, 0, 0), (x, y, snake.width, snake.height), 1)  # Red outline for paths
+            pg.draw.rect(surface, pg.Color(255, 0, 0), (x, y, snake.width, snake.height), 2)  # Red outline for paths
+
+def draw_potential_collisions(surface, collisions, snake):
+    for pos in collisions:
+        x = pos[0]
+        y = pos[1]
+        pg.draw.rect(surface, pg.Color(255, 255, 0), (x, y, snake.width, snake.height), 1)  # Yellow outline for collisions
 
 def get_direction(snake, next_cell):
     current_x = int(snake.x / snake.width)
@@ -425,25 +461,23 @@ def get_direction(snake, next_cell):
     else:
         return snake.direction  # No change
 
-
-def get_direction_from_positions(current_pos, next_pos):
+def get_direction_from_positions(current_pos, next_pos, current_direction):
     current_x, current_y = current_pos
     next_x, next_y = next_pos
 
-    if next_x == current_x + 1:
+    if next_x == current_x + 1 and next_y == current_y and current_direction != 'left':
         return 'right'
-    elif next_x == current_x - 1:
+    elif next_x == current_x - 1 and next_y == current_y and current_direction != 'right':
         return 'left'
-    elif next_y == current_y + 1:
+    elif next_y == current_y + 1 and next_x == current_x and current_direction != 'up':
         return 'down'
-    elif next_y == current_y - 1:
+    elif next_y == current_y - 1 and next_x == current_x and current_direction != 'down':
         return 'up'
     else:
-        return None  # Should not happen
+        return None  # Should not happen if positions are adjacent
 
 
-def find_shortest_safe_path(snake, fruit):
-    from collections import deque
+def find_shortest_safe_path(snake, fruit, cycle, max_corner_cuts=3, max_depth=100):
 
     grid_width = screen_width // snake.width
     grid_height = screen_height // snake.height
@@ -460,7 +494,6 @@ def find_shortest_safe_path(snake, fruit):
         else:
             print(f"Warning: Snake segment out of bounds at ({x}, {y})")
 
-    # BFS to find the shortest path
     start = (snake.x // snake.width, snake.y // snake.height)
     end = (fruit.x // fruit.width, fruit.y // fruit.height)
 
@@ -472,67 +505,151 @@ def find_shortest_safe_path(snake, fruit):
         print(f"Error: Fruit's end position {end} is out of bounds.")
         return None
 
-    queue = deque()
-    queue.append((start, [start]))
-    visited = set()
-    visited.add(start)
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-    while queue:
-        current_pos, path = queue.popleft()
+    open_set = []
+    heapq.heappush(open_set, (0, start, [start], 0))  # (priority, position, path, deviation_count)
+    visited = set()
+    visited.add((start, 0))  # Include deviation count in visited
+
+    while open_set:
+        _, current_pos, path, deviation_count = heapq.heappop(open_set)
         if current_pos == end:
             # Found a path
             return path
+
+        if len(path) > max_depth or deviation_count > max_corner_cuts:
+            continue  # Exceeded depth or deviation limit
+
         neighbors = get_neighbors(current_pos, grid_width, grid_height)
+        cycle_neighbors = get_cycle_neighbors(current_pos, cycle)
+
         for neighbor in neighbors:
             x, y = neighbor
             if (0 <= x < grid_width) and (0 <= y < grid_height):
-                if grid[y][x] == 0 and neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append((neighbor, path + [neighbor]))
+                if grid[y][x] == 0:
+                    new_deviation_count = deviation_count
+                    if neighbor not in cycle_neighbors:
+                        new_deviation_count += 1
+                    if ((neighbor, new_deviation_count) not in visited) and (new_deviation_count <= max_corner_cuts):
+                        visited.add((neighbor, new_deviation_count))
+                        priority = len(path) + heuristic(neighbor, end)
+                        heapq.heappush(open_set, (priority, neighbor, path + [neighbor], new_deviation_count))
 
     # No path found
     return None
 
-def is_safe_shortcut(snake, path, cycle):
+def get_cycle_neighbors(position, cycle):
+    try:
+        index = cycle.index(position)
+    except ValueError:
+        return []
+    prev_index = (index - 1) % len(cycle)
+    next_index = (index + 1) % len(cycle)
+    return [cycle[prev_index], cycle[next_index]]
+
+
+
+def is_safe_shortcut(snake, path, cycle, fruit):
     """
     Determines if taking the shortcut path is safe.
     Ensures that after following the path, the snake can continue following the cycle without collisions.
     """
-    # Simulate the snake's body after taking the shortcut
-    simulated_body = deque(snake.body)
-    simulated_segment = deque(snake.segment)
-    simulated_length = snake.length()
-    potential_collisions = []
+    # Copy the snake's body and positions
+    simulated_body = deque((pos[0], pos[1]) for pos in snake.body)
+    simulated_positions = Counter(simulated_body)
+    simulated_length = len(simulated_body)
+    will_grow = False
 
-    for pos in path[1:]:  # Skip the current position
-        simulated_body.appendleft([pos[0] * snake.width, pos[1] * snake.height])
-        if len(simulated_body) > simulated_length:
-            simulated_body.pop()
+    # Commented out debug prints
+    # print(f"Initial simulated body: {simulated_body}")
+    # print(f"Initial simulated positions: {simulated_positions}")
 
-    # Find the index of the new head in the cycle
+    for idx, pos in enumerate(path[1:], 1):  # Skip the current position
+        pos_world = (pos[0] * snake.width, pos[1] * snake.height)
+
+        # Check for collision
+        if simulated_positions[pos_world] > 0:
+            # print(f"Collision detected at {pos_world}")
+            return False  # Collision detected
+
+        # Move the head
+        simulated_body.appendleft(pos_world)
+        simulated_positions[pos_world] += 1
+
+        # Commented out debug prints
+        # print(f"Moved head to {pos_world}")
+        # print(f"Simulated body: {simulated_body}")
+        # print(f"Simulated positions: {simulated_positions}")
+
+        # Check if the snake will eat the fruit at this position
+        if pos == (fruit.x // fruit.width, fruit.y // fruit.height):
+            will_grow = True
+
+        # Move the tail unless the snake is growing
+        if not will_grow:
+            tail = simulated_body.pop()
+            simulated_positions[tail] -= 1
+            if simulated_positions[tail] == 0:
+                del simulated_positions[tail]
+
+            # Commented out debug prints
+            # print(f"Moved tail from {tail}")
+            # print(f"Simulated body after tail move: {simulated_body}")
+            # print(f"Simulated positions after tail move: {simulated_positions}")
+        else:
+            # print("Snake is growing; tail not moved.")
+            will_grow = False  # Growth happens only once after eating
+
+    # Update steps_to_simulate based on the new length of the snake
+    steps_to_simulate = len(simulated_body)
+    # print(f"After shortcut, steps_to_simulate: {steps_to_simulate}")
+
+    # After the shortcut, simulate rejoining the cycle
     new_head = path[-1]
     try:
         cycle_index = cycle.index(new_head)
     except ValueError:
-        return False, potential_collisions  # Position not found in cycle
+        # print(f"Position {new_head} not found in cycle.")
+        return False  # Position not found in cycle
 
-    # Perform lookahead simulation
-    steps_to_simulate = simulated_length  # Simulate up to the snake's length
-    for step in range(steps_to_simulate):
+    for _ in range(steps_to_simulate):
         cycle_index = (cycle_index + 1) % len(cycle)
         next_pos = cycle[cycle_index]
-        next_pos_world = [next_pos[0] * snake.width, next_pos[1] * snake.height]
+        next_pos_world = (next_pos[0] * snake.width, next_pos[1] * snake.height)
 
-        if next_pos_world in simulated_body:
-            potential_collisions.append(next_pos_world)
-            return False, potential_collisions  # Collision detected
+        # Check for collision
+        if simulated_positions[next_pos_world] > 0:
+            # print(f"Collision detected at {next_pos_world} while rejoining cycle")
+            return False  # Collision detected
 
+        # Move the head
         simulated_body.appendleft(next_pos_world)
-        if len(simulated_body) > simulated_length:
-            simulated_body.pop()
+        simulated_positions[next_pos_world] += 1
 
-    # No collision detected in the lookahead
-    return True, potential_collisions
+        # Commented out debug prints
+        # print(f"Moved head to {next_pos_world} while rejoining cycle")
+        # print(f"Simulated body: {simulated_body}")
+        # print(f"Simulated positions: {simulated_positions}")
+
+        # Move the tail unless the snake is growing
+        if not will_grow:
+            tail = simulated_body.pop()
+            simulated_positions[tail] -= 1
+            if simulated_positions[tail] == 0:
+                del simulated_positions[tail]
+
+            # Commented out debug prints
+            # print(f"Moved tail from {tail} while rejoining cycle")
+            # print(f"Simulated body after tail move: {simulated_body}")
+            # print(f"Simulated positions after tail move: {simulated_positions}")
+        else:
+            # print("Snake is growing; tail not moved while rejoining cycle.")
+            will_grow = False  # Growth happens only once after eating
+
+    # print("Shortcut is safe.")
+    return True
 
 
 def extend_shortcut_until_safe(snake, path, cycle):
@@ -566,8 +683,6 @@ def extend_shortcut_until_safe(snake, path, cycle):
     # No safe extension found
     return None
 
-
-
 def get_neighbors(pos, grid_width, grid_height):
     x, y = pos
     neighbors = []
@@ -590,6 +705,8 @@ def draw_hamiltonian_cycle(surface, cycle, snake):
     start_pos = (cycle[-1][0] * snake.width + snake.width // 2, cycle[-1][1] * snake.height + snake.height // 2)
     end_pos = (cycle[0][0] * snake.width + snake.width // 2, cycle[0][1] * snake.height + snake.height // 2)
     pg.draw.line(surface, pg.Color(0, 0, 255), start_pos, end_pos, 1)
+
+
 
 
 # Uses prim's algorithm to generate a randomized maze using randomized edge weights
@@ -810,7 +927,7 @@ def hamiltonian_cycle(grid_rows, grid_columns, orientation):
                 if 'down' not in orientation[j, i-1]:
                     hamiltonian_graph[j * 2, i * 2] += [(j * 2 + 1, i * 2)]
 
-            # Finds available adjacent cells if current cell is in the left corner
+            # Finds available adjacent cells if current cell is in the left column
             elif j == 0:
                 hamiltonian_graph[j*2, i*2] = [(j*2, i*2 + 1)]
                 if 'right' in orientation[j, i]:
@@ -821,9 +938,9 @@ def hamiltonian_cycle(grid_rows, grid_columns, orientation):
                 if 'down' in orientation[j, i]:
                     hamiltonian_graph[j*2, i*2 + 1] = [(j*2, i*2 + 2)]
                     if (j*2 + 1, i*2 + 1) in hamiltonian_graph:
-                        hamiltonian_graph[j*2 + 1, i*2 + 1] += [(j*2 + 1, i*2 + 2)]
+                        hamiltonian_graph[j * 2 + 1, i * 2 + 1] += [(j * 2 + 1, i * 2 + 2)]
                     else:
-                        hamiltonian_graph[j * 2 + 1, i * 2 + 1] = [(j * 2 + 1, i * 2 + 2)]
+                        hamiltonian_graph[j*2 + 1, i*2 + 1] = [(j*2 + 1, i*2 + 2)]
                 else:
                     hamiltonian_graph[j*2, i*2 + 1] = [(j*2 + 1, i*2 + 1)]
                 if 'down' not in orientation[j, i-1]:
