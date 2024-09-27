@@ -1076,7 +1076,7 @@ def path_generator(graph, cells):
     return path
 
 def validate_hamiltonian_cycle(cycle, grid_rows, grid_columns):
-    expected_length = grid_rows * grid_columns  # Correct expected length
+    expected_length = grid_rows * grid_columns * 4  # Corrected expected length
     if len(cycle) != expected_length:
         logging.error(f"Invalid cycle length: expected {expected_length}, got {len(cycle)}")
         return False
@@ -1096,8 +1096,12 @@ def validate_hamiltonian_cycle(cycle, grid_rows, grid_columns):
 
 
 def run_pygame():
-    circuit = prim_maze_generator(int(screen_height/40), int(screen_width/40))
-    if not validate_hamiltonian_cycle(circuit, int(screen_height/40), int(screen_width/40)):
+    maze_rows = int(screen_height / 40)
+    maze_columns = int(screen_width / 40)
+    circuit = prim_maze_generator(maze_rows, maze_columns)
+    hamiltonian_rows = maze_rows * 2
+    hamiltonian_columns = maze_columns * 2
+    if not validate_hamiltonian_cycle(circuit, hamiltonian_rows, hamiltonian_columns):
         logging.error("Failed to validate Hamiltonian cycle. Exiting game.")
         stop_game.set()
         pg.quit()
