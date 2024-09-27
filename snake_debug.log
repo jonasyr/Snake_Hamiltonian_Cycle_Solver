@@ -1,0 +1,2 @@
+2024-09-27 03:35:55,106 [ERROR] Invalid cycle length: expected 300, got 1200
+2024-09-27 03:35:55,107 [ERROR] Failed to validate Hamiltonian cycle. Exiting game.

@@ -9,7 +9,17 @@ from tkinter import ttk
 import threading
 import psutil
 import heapq
+import logging
 
+# Configure logging at the start of your script
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler("snake_debug.log"),
+        logging.StreamHandler()
+    ]
+)
 
 # Used to modify the window size, values must be a multiple of 40
 screen_width = 800
@@ -139,16 +149,21 @@ class Fruit(object):
         return self.fruit.colliderect(head)
 
     # Finds a new location for a fruit after a collision occurs
-    def fruit_position(self, snake):
-        flag = True
-        while flag:
-            # The position of the fruit is chosen randomly
+    def fruit_position(self, snake, max_attempts=100):
+        attempts = 0
+        while attempts < max_attempts:
             self.x = randint(0, int(screen_width / self.width) - 1) * self.width
             self.y = randint(0, int(screen_height / self.height) - 1) * self.height
 
-            # Checks whether the new fruit location is already occupied by the snake's body
             if snake.empty_space(self.x, self.y):
-                flag = False
+                return  # Successfully placed the fruit
+            attempts += 1
+
+        # If no position is found after max_attempts, handle accordingly
+        logging.error("Failed to place a new fruit. Ending game.")
+        stop_game.set()
+        pg.quit()
+        sys.exit()
 
 class Snake(object):
     def __init__(self):
@@ -184,12 +199,12 @@ class Snake(object):
 
     # Adds a segment to the snake if a collision between the head and fruit occurs
     def snake_size(self):
-        if len(self.body) != 0:
-            index = len(self.body) - 1
-            x = self.body[index][0]
-            y = self.body[index][1]
-            self.body.append([x, y])
-            self.segment.append(pg.Rect(x, y, self.width, self.height))
+        if self.body:
+            tail = self.body[-1]
+            new_segment = [tail[0], tail[1]]
+            self.body.append(new_segment)
+            self.segment.append(pg.Rect(new_segment[0], new_segment[1], self.width, self.height))
+            logging.info(f"Snake grew. New length: {len(self.body)}")
 
     # Ends the game in the case where the snake collides with the boundaries or the head collides with a body segment
     def boundary_collision(self):
@@ -232,14 +247,22 @@ class Snake(object):
     # Changes the orientation of movement
     # A snake moving in one direction cannot move in the opposite direction as it would collide with its body
     def change_direction(self, direction):
-        if direction == 'up' and self.direction != 'down':
-            self.direction = 'up'
-        elif direction == 'down' and self.direction != 'up':
-            self.direction = 'down'
-        elif direction == 'right' and self.direction != 'left':
-            self.direction = 'right'
-        elif direction == 'left' and self.direction != 'right':
-            self.direction = 'left'
+        opposite_directions = {
+            'up': 'down',
+            'down': 'up',
+            'left': 'right',
+            'right': 'left'
+        }
+
+        if direction == opposite_directions.get(self.direction):
+            logging.info(f"Ignored attempt to reverse direction from '{self.direction}' to '{direction}'.")
+            return  # Ignore reversing direction
+
+        if direction in ['up', 'down', 'left', 'right']:
+            logging.info(f"Changing direction from '{self.direction}' to '{direction}'.")
+            self.direction = direction
+        else:
+            logging.warning(f"Attempted to change to invalid direction '{direction}'.")
 
     # Checks whether a new fruit position conflicts with a body segment of the snake
     def empty_space(self, x_coordinate, y_coordinate):
@@ -269,15 +292,15 @@ def gameplay(fruit, snake, cycle):
     try:
         index = cycle.index(position)
     except ValueError:
-        print(f"Initial position {position} not found in the Hamiltonian cycle.")
+        logging.error(f"Initial position {position} not found in the Hamiltonian cycle.")
         pg.quit()
         return
 
     length = len(cycle)
     run = True
 
-    while run and not stop_game.is_set():
-        try:
+    try:
+        while run and not stop_game.is_set():
             # Control frame rate
             clock = pg.time.Clock()
             clock.tick(speed_var.get())
@@ -309,6 +332,8 @@ def gameplay(fruit, snake, cycle):
                     if debug_mode_var.get() and show_paths_var.get():
                         simulated_paths.clear()
                         simulated_paths.append(path_to_fruit)  # Store the path for debugging
+
+                    logging.info(f"Taking shortcut path: {path_to_fruit}")
 
                     for next_pos in path_to_fruit[1:]:  # Exclude the current position
                         # Convert grid coordinates to pixel positions
@@ -360,11 +385,14 @@ def gameplay(fruit, snake, cycle):
                         pg.display.update()
                         clock.tick(speed_var.get())
 
+                        # Debugging Output
+                        logging.debug(f"Snake moved to {next_pos} with direction '{snake.direction}'")
+
                     # Rejoin the cycle
                     try:
                         index = cycle.index(position)
                     except ValueError:
-                        print(f"Position after shortcut {position} not found in the Hamiltonian cycle.")
+                        logging.error(f"Position after shortcut {position} not found in the Hamiltonian cycle.")
                         stop_game.set()
                         pg.quit()
                         return
@@ -386,6 +414,8 @@ def gameplay(fruit, snake, cycle):
             # Move along the cycle
             if direction:
                 snake.change_direction(direction)
+            else:
+                logging.warning("No valid direction found; maintaining current direction.")
             position = next_pos
             index += 1
 
@@ -414,6 +444,9 @@ def gameplay(fruit, snake, cycle):
                 pg.quit()
                 return
 
+            # Debugging Output
+            logging.debug(f"Snake is moving {snake.direction} to position {position}")
+
             # Draw simulated paths if debugging mode and show paths are enabled
             if debug_mode_var.get() and show_paths_var.get():
                 draw_simulated_paths(window, simulated_paths, snake)
@@ -424,13 +457,11 @@ def gameplay(fruit, snake, cycle):
             # Clear simulated paths when not taking a shortcut
             simulated_paths.clear()
 
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            stop_game.set()
-            pg.quit()
-            return
-
-
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
+        stop_game.set()
+        pg.quit()
+        sys.exit()
 
 def draw_simulated_paths(surface, paths, snake):
     for path in paths:
@@ -462,19 +493,36 @@ def get_direction(snake, next_cell):
         return snake.direction  # No change
 
 def get_direction_from_positions(current_pos, next_pos, current_direction):
+    if not are_adjacent(current_pos, next_pos):
+        logging.error(f"Error: Positions {current_pos} and {next_pos} are not adjacent.")
+        return current_direction  # Fallback to current direction
+
     current_x, current_y = current_pos
     next_x, next_y = next_pos
 
+    direction = None
+
     if next_x == current_x + 1 and next_y == current_y and current_direction != 'left':
-        return 'right'
+        direction = 'right'
     elif next_x == current_x - 1 and next_y == current_y and current_direction != 'right':
-        return 'left'
+        direction = 'left'
     elif next_y == current_y + 1 and next_x == current_x and current_direction != 'up':
-        return 'down'
+        direction = 'down'
     elif next_y == current_y - 1 and next_x == current_x and current_direction != 'down':
-        return 'up'
+        direction = 'up'
+
+    if direction is None:
+        logging.warning(f"Warning: No valid direction from {current_pos} to {next_pos}. Maintaining current direction '{current_direction}'.")
+        direction = current_direction  # Fallback to current direction
     else:
-        return None  # Should not happen if positions are adjacent
+        logging.debug(f"Determined direction '{direction}' from {current_pos} to {next_pos}.")
+
+    return direction
+
+def are_adjacent(pos1, pos2):
+    x1, y1 = pos1
+    x2, y2 = pos2
+    return (abs(x1 - x2) == 1 and y1 == y2) or (x1 == x2 and abs(y1 - y2) == 1)
 
 
 def find_shortest_safe_path(snake, fruit, cycle, max_corner_cuts=3, max_depth=100):
@@ -492,17 +540,17 @@ def find_shortest_safe_path(snake, fruit, cycle, max_corner_cuts=3, max_depth=10
         if 0 <= x < grid_width and 0 <= y < grid_height:
             grid[y][x] = 1  # 1 represents snake's body
         else:
-            print(f"Warning: Snake segment out of bounds at ({x}, {y})")
+            logging.warning(f"Warning: Snake segment out of bounds at ({x}, {y})")
 
     start = (snake.x // snake.width, snake.y // snake.height)
     end = (fruit.x // fruit.width, fruit.y // fruit.height)
 
     # Validate start and end positions
     if not (0 <= start[0] < grid_width and 0 <= start[1] < grid_height):
-        print(f"Error: Snake's start position {start} is out of bounds.")
+        logging.error(f"Error: Snake's start position {start} is out of bounds.")
         return None
     if not (0 <= end[0] < grid_width and 0 <= end[1] < grid_height):
-        print(f"Error: Fruit's end position {end} is out of bounds.")
+        logging.error(f"Error: Fruit's end position {end} is out of bounds.")
         return None
 
     def heuristic(a, b):
@@ -1027,9 +1075,33 @@ def path_generator(graph, cells):
     # Returns the coordinates of the hamiltonian cycle path
     return path
 
+def validate_hamiltonian_cycle(cycle, grid_rows, grid_columns):
+    expected_length = grid_rows * grid_columns  # Correct expected length
+    if len(cycle) != expected_length:
+        logging.error(f"Invalid cycle length: expected {expected_length}, got {len(cycle)}")
+        return False
+
+    unique_positions = set(cycle)
+    if len(unique_positions) != expected_length:
+        logging.error("Cycle contains duplicate positions.")
+        return False
+
+    # Check if the cycle is closed (last position connects to the first)
+    if cycle[0] != cycle[-1]:
+        logging.error("Cycle is not closed.")
+        return False
+
+    logging.info("Hamiltonian cycle validated successfully.")
+    return True
+
 
 def run_pygame():
     circuit = prim_maze_generator(int(screen_height/40), int(screen_width/40))
+    if not validate_hamiltonian_cycle(circuit, int(screen_height/40), int(screen_width/40)):
+        logging.error("Failed to validate Hamiltonian cycle. Exiting game.")
+        stop_game.set()
+        pg.quit()
+        sys.exit()
     pg.init()
     global window
     window = pg.display.set_mode((screen_width, screen_height))
